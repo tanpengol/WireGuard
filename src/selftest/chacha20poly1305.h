@@ -1138,7 +1138,7 @@ bool __init chacha20poly1305_selftest(void)
 			pr_info("chacha20poly1305 encryption self-test %zu: FAIL\n", i + 1);
 			success = false;
 			pr_info("Test: %d, size: ilen: %d MAC: %d", i, chacha20poly1305_enc_vectors[i].ilen, POLY1305_MAC_SIZE);
-			for (j = 0; j < chacha20poly1305_enc_vectors[i].ilen; ++j) {
+			for (j = 0; j < chacha20poly1305_enc_vectors[i].ilen + POLY1305_MAC_SIZE; ++j) {
 				pr_info("%5d: %2x, %2x, %2x", j, computed_result[j], chacha20poly1305_enc_vectors[i].result[j], chacha20poly1305_enc_vectors[i].input[j]);
 			}
 			if ( (i+1) >= 5) return success;
@@ -1170,55 +1170,34 @@ bool __init chacha20poly1305_selftest(void)
 	}
 
 #if 1
-	pr_info("Start chacha20 benchmark: ");
-
-	struct chacha20_ctx chacha20_state = chacha20_initial_state(chacha20poly1305_enc_vectors[0].key, (u8 *)&chacha20poly1305_enc_vectors->nonce);
+	pr_info("Start poly1305 benchmark: ");
 
 	u8 block0[1500];
-	u8 *l;
+	u8 key[16] = { 0 };
+	u32 nonce[10] = { 0 };
 
 	cycles_t start, end;
 	size_t size;
-	enum { runs = 1 };
+	enum { runs = 1024 };
 
 	msleep(3000);
 
-#if 0
-	for (i = 0; i < runs; ++i)
-		chacha20_crypt(&chacha20_state, block0, block0, sizeof(block0), false);
+	for (i=0; i < runs; ++i)
+		poly1305_blocks_mips(&nonce, block0, 1440, 0);
 
-	for (size = 0; size < 65; size++) {
+	for (size = 0; size < 1441; size+=16) {
 		start = get_cycles();
-		for (i = 0; i < runs; ++i)
-			chacha20_crypt(&chacha20_state, block0, block0, size, false);
+		for (i=0; i < runs; ++i)
+			poly1305_blocks_mips(&nonce, block0, size, 0);
 		end = get_cycles();
-		pr_info("chacha20_crypt: %5d bytes: %8x, %8x, %u cycles per block\n", size, end, start, (end - start) / runs);
+		pr_info("poly1305_block_mips: %5d bytes: %8x, %8x, %8u, %5u cycles\n", size, end, start, (end - start),(end - start) / runs);
+
+		start = get_cycles();
+		for (i=0; i < runs; ++i)
+			poly1305_blocks_generic(&nonce, block0, size, 1);
+		end = get_cycles();
+		pr_info(" poly1305_block_gen: %5d bytes: %8x, %8x, %8u, %5u cycles\n", size, end, start, (end - start),(end - start) / runs);
 	}
-
-
-	for (size = 1408-64; size < 1441; size++) {
-		start = get_cycles();
-		for (i = 0; i < runs; ++i)
-			chacha20_crypt(&chacha20_state, block0, block0, size, false);
-		end = get_cycles();
-		pr_info("chacha20_crypt: %5d bytes: %8x, %8x, %u cycles per block\n", size, end, start, (end - start) / runs);
-	}
-#endif
-	for (size = 0; size < 1441; size+=32) {
-		// clear cache
-		for (l=block0; l < block0+sizeof(block0); l += 32)
-			asm ("cache 17, 0(%0)" : : "r" (l));
-		start = get_cycles();
-		chacha20_crypt(&chacha20_state, block0, block0, size, false);
-		end = get_cycles();
-		pr_info("chacha20cached: %5d bytes: %8x, %8x, %u cycles per block --\n", size, end, start, (end - start));
-
-		start = get_cycles();
-		chacha20_crypt(&chacha20_state, block0, block0, size, false);
-		end = get_cycles();
-		pr_info("chacha20_crypt: %5d bytes: %8x, %8x, %u cycles per block\n", size, end, start, (end - start));
-	}
-
 
 #endif
 	if (success)
