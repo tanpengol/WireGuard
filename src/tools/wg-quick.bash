@@ -92,7 +92,7 @@ del_if() {
 	fwmark="$(wg show "$INTERFACE" fwmark)"
 	DEFAULT_TABLE=0
 	[[ $fwmark != off ]] && DEFAULT_TABLE=$(( fwmark ))
-	if [[ $DEFAULT_TABLE -ne 0 ]]; then
+	if [[ $DEFAULT_TABLE -ne 0 ]] && wg show "$INTERFACE" allowed-ips | cut -f2 | grep -q "/0"; then
 		while [[ $(ip -4 rule show) == *"lookup $DEFAULT_TABLE"* ]]; do
 			cmd ip -4 rule delete table $DEFAULT_TABLE
 		done
@@ -171,6 +171,8 @@ add_route() {
 
 DEFAULT_TABLE=
 add_default() {
+	local fwmark="$(wg show "$INTERFACE" fwmark)"
+	[[ $fwmark != off ]] && DEFAULT_TABLE=$(( fwmark )) # TODO: Should we check if this table is already in use?
 	if [[ -z $DEFAULT_TABLE ]]; then
 		DEFAULT_TABLE=51820
 		while [[ -n $(ip -4 route show table $DEFAULT_TABLE) || -n $(ip -6 route show table $DEFAULT_TABLE) ]]; do
