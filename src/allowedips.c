@@ -22,31 +22,35 @@ struct allowedips_node {
 	u8 cidr, bit_at_a, bit_at_b;
 };
 
-static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, u8 cidr)
+static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, u8 cidr, u8 bits)
 {
     u8 cidr_bottom = cidr;
-    if(cidr > 64){
-        cidr_bottom = 64;
-    }
+    
 	node->cidr = cidr;
 	node->bit_at_a = cidr / 8;
 	node->bit_at_b = 7 - (cidr % 8);
 	if (cidr) {
 		memcpy(node->bits, src, (cidr + 7) / 8);
-        if (cidr == 0) {
-            node->v4 = 0;
+        if(bits==32){
+            if (cidr == 0) {
+                node->v4 = 0;
+            }
+            else {
+                node->v4 &= ~0U << (32 - cidr);
+            }
         }
-        else {
-            node->v4 &= ~0U << ((32 - cidr) % 32);
-        }
-
-        if (cidr == 0)  {
-            node->v6[0] = 0; 
-            node->v6[1] = 0;
-        }
-        else {
-            node->v6[0] &= ~0U << ((64 - (u8)(cidr - 64)) % 64);
-            node->v6[1] &= ~0U << ((64 - (u8)(cidr_bottom )) % 64);
+        if(bits==128){
+            if(cidr > 64){
+                cidr_bottom = 64;
+            }
+            if (cidr == 0)  {
+                node->v6[0] = 0; 
+                node->v6[1] = 0;
+            }
+            else {
+                node->v6[0] &= ~0U << ((64 - (u8)(cidr - 64)));
+                node->v6[1] &= ~0U << ((64 - (u8)(cidr_bottom )));
+            }
         }
        
 	}
@@ -229,7 +233,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 		if (!node)
 			return -ENOMEM;
 		node->peer = peer;
-		copy_and_assign_cidr(node, keynew, cidr);
+		copy_and_assign_cidr(node, keynew, cidr, bits);
 		rcu_assign_pointer(*trie, node);
 		return 0;
 	}
@@ -242,7 +246,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 	if (!newnode)
 		return -ENOMEM;
 	newnode->peer = peer;
-	copy_and_assign_cidr(newnode, keynew, cidr);
+	copy_and_assign_cidr(newnode, keynew, cidr, bits);
 
 	if (!node)
 		down = rcu_dereference_protected(*trie, lockdep_is_held(lock));
@@ -268,7 +272,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 			kfree(newnode);
 			return -ENOMEM;
 		}
-		copy_and_assign_cidr(node, newnode->bits, cidr);
+		copy_and_assign_cidr(node, newnode->bits, cidr, bits);
 
 		rcu_assign_pointer(choose_node(node, down->bits), down);
 		rcu_assign_pointer(choose_node(node, newnode->bits), newnode);
