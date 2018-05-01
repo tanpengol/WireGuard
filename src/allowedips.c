@@ -15,8 +15,8 @@ struct allowedips_node {
 	 * doesn't actually make a difference.
 	 */
 	union {
-		__be64 v6[2];
-		__be32 v4;
+		u64 v6[2];
+		u32 v4;
 		u8 bits[16];
 	};
 	u8 cidr, bit_at_a, bit_at_b;
@@ -24,12 +24,30 @@ struct allowedips_node {
 
 static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, u8 cidr)
 {
+    u8 cidr_bottom = cidr;
+    if(cidr > 64){
+        cidr_bottom = 64;
+    }
 	node->cidr = cidr;
 	node->bit_at_a = cidr / 8;
 	node->bit_at_b = 7 - (cidr % 8);
 	if (cidr) {
 		memcpy(node->bits, src, (cidr + 7) / 8);
-		node->bits[(cidr + 7) / 8 - 1] &= ~0U << ((8 - (cidr % 8)) % 8);
+        if (cidr == 0) {
+            node->v4 = 0;
+        }
+        else {
+            node->v4 &= ~0U << ((32 - cidr) % 32);
+        }
+
+        if (cidr == 0)  {
+            node->v6[0] = 0; 
+            node->v6[1] = 0;
+        }
+        else {
+            node->v6[0] &= ~0U << ((64 - (u8)(cidr - 64)) % 64);
+            node->v6[1] &= ~0U << ((64 - (u8)(cidr_bottom )) % 64);
+        }
        
 	}
 }
@@ -194,7 +212,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 {
 	struct allowedips_node *node, *parent, *down, *newnode;
     u8 keynew[16];
-    __u64 tmp;
+    u64 tmp;
 
 	if (unlikely(cidr > bits || !peer))
 		return -EINVAL;
