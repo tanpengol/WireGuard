@@ -24,34 +24,18 @@ struct allowedips_node {
 
 static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, u8 cidr, u8 bits)
 {
-    u8 cidr_bottom = cidr;
-    
 	node->cidr = cidr;
 	node->bit_at_a = cidr / 8;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	node->bit_at_a = (bits / 8 - 1) - node->bit_at_a;
+#endif
 	node->bit_at_b = 7 - (cidr % 8);
 	if (cidr) {
 		memcpy(node->bits, src, (cidr + 7) / 8);
-        if(bits==32){
-            if (cidr == 0) {
-                node->v4 = 0;
-            }
-            else {
-                node->v4 &= ~0U << (32 - cidr);
-            }
-        }
-        if(bits==128){
-            if(cidr > 64){
-                cidr_bottom = 64;
-            }
-            if (cidr == 0)  {
-                node->v6[0] = 0; 
-                node->v6[1] = 0;
-            }
-            else {
-                node->v6[0] &= ~0U << ((64 - (u8)(cidr - 64)));
-                node->v6[1] &= ~0U << ((64 - (u8)(cidr_bottom )));
-            }
-        }
+        if(bits==32)
+            node->v4 &= ~0U << (32 - cidr);
+        if(bits==128)
+            node->v6[(cidr + 63) / 64 - 1] &= ~0ULL << ((128 - cidr) % 64);
        
 	}
 }
