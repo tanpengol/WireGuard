@@ -13,6 +13,7 @@ static __init void print_node(struct allowedips_node *node, u8 bits)
 	char *style = "dotted";
 	char *fmt_connection = KERN_DEBUG "\t\"%p/%d\" -> \"%p/%d\";\n";
 	char *fmt_declaration = KERN_DEBUG "\t\"%p/%d\"[style=%s, color=\"#%06x\"];\n";
+	u8 key1[16], key2[16];
 	if (bits == 32) {
 		fmt_connection = KERN_DEBUG "\t\"%pI4/%d\" -> \"%pI4/%d\";\n";
 		fmt_declaration = KERN_DEBUG "\t\"%pI4/%d\"[style=%s, color=\"#%06x\"];\n";
@@ -26,13 +27,16 @@ static __init void print_node(struct allowedips_node *node, u8 bits)
 		color = hsiphash_1u32(0xdeadbeef, &key) % 200 << 16 | hsiphash_1u32(0xbabecafe, &key) % 200 << 8 | hsiphash_1u32(0xabad1dea, &key) % 200;
 		style = "bold";
 	}
-	printk(fmt_declaration, node->bits, node->cidr, style, color);
+	bswap_ip(node->bits, bits, key1);
+	printk(fmt_declaration, key1, node->cidr, style, color);
 	if (node->bit[0]) {
-		printk(fmt_connection, node->bits, node->cidr, node->bit[0]->bits, node->bit[0]->cidr);
+		bswap_ip(node->bit[0]->bits, bits, key2);
+		printk(fmt_connection, key1, node->cidr, key2, node->bit[0]->cidr);
 		print_node(node->bit[0], bits);
 	}
 	if (node->bit[1]) {
-		printk(fmt_connection, node->bits, node->cidr, node->bit[1]->bits, node->bit[1]->cidr);
+		bswap_ip(node->bit[1]->bits, bits, key2);
+		printk(fmt_connection, key1, node->cidr, key2, node->bit[1]->cidr);
 		print_node(node->bit[1], bits);
 	}
 }

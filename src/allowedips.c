@@ -13,23 +13,49 @@ struct allowedips_node {
 	/* While it may seem scandalous that we waste space for v4,
 	 * we're alloc'ing to the nearest power of 2 anyway, so this
 	 * doesn't actually make a difference.
+	 *
+	 * NOTE: Addresses are stored in native endian, to save byte swaps in
+	 * the search loop.
 	 */
 	union {
-		__be64 v6[2];
-		__be32 v4;
+		u64 v6[2];
+		u32 v4;
 		u8 bits[16];
 	};
 	u8 cidr, bit_at_a, bit_at_b;
 };
 
-static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, u8 cidr)
+static void bswap_ip(const void *ip, u8 bits, void *out) {
+	switch (bits) {
+	case 32:
+		((u32 *)out)[0] = be32_to_cpup(ip);
+		break;
+	case 128:
+		((u64 *)out)[0] = be64_to_cpup(ip);
+		((u64 *)out)[1] = be64_to_cpup((__be64 *)ip+1);
+		break;
+	default:
+		BUG();
+	}
+}
+
+static void copy_and_assign_cidr(struct allowedips_node *node, u8 bits, const u8 *src, u8 cidr)
 {
+	static const u8 mapping[16] = {
+		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+	};
+	int i;
+
+	bswap_ip(mapping, bits, mapping);
+
 	node->cidr = cidr;
-	node->bit_at_a = cidr / 8;
+	node->bit_at_a = mapping[cidr / 8];
 	node->bit_at_b = 7 - (cidr % 8);
+
 	if (cidr) {
-		memcpy(node->bits, src, (cidr + 7) / 8);
-		node->bits[(cidr + 7) / 8 - 1] &= ~0U << ((8 - (cidr % 8)) % 8);
+		for (i = 0; i < (cidr + 7) / 8; i++)
+			node->bits[mapping[i]] = src[mapping[i]];
+		node->bits[node->bit_at_a] &= ~0U << ((8 - (cidr % 8)) % 8);
 	}
 }
 
@@ -130,9 +156,9 @@ static __always_inline unsigned int fls128(u64 a, u64 b)
 static __always_inline u8 common_bits(const struct allowedips_node *node, const u8 *key, u8 bits)
 {
 	if (bits == 32)
-		return 32 - fls(be32_to_cpu(node->v4 ^ *(const __be32 *)key));
+		return 32 - fls(node->v4 ^ *(const u32 *)key);
 	else if (bits == 128)
-		return 128 - fls128(be64_to_cpu(node->v6[0] ^ *(const __be64 *)&key[0]), be64_to_cpu(node->v6[1] ^ *(const __be64 *)&key[8]));
+		return 128 - fls128(node->v6[0] ^ *(const u64 *)&key[0], node->v6[1] ^ *(const u64 *)&key[8]);
 	return 0;
 }
 
@@ -162,9 +188,12 @@ static __always_inline struct wireguard_peer *lookup(struct allowedips_node __rc
 {
 	struct wireguard_peer *peer = NULL;
 	struct allowedips_node *node;
+	u8 key[16];
+
+	bswap_ip(ip, bits, key);
 
 	rcu_read_lock_bh();
-	node = find_node(rcu_dereference_bh(root), bits, ip);
+	node = find_node(rcu_dereference_bh(root), bits, key);
 	if (node)
 		peer = peer_get(node->peer);
 	rcu_read_unlock_bh();
@@ -189,19 +218,26 @@ static inline bool node_placement(struct allowedips_node __rcu *trie, const u8 *
 	return exact;
 }
 
-static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 cidr, struct wireguard_peer *peer, struct mutex *lock)
+static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key_be, u8 cidr, struct wireguard_peer *peer, struct mutex *lock)
 {
 	struct allowedips_node *node, *parent, *down, *newnode;
+	u8 key[16];
 
 	if (unlikely(cidr > bits || !peer))
 		return -EINVAL;
+
+	/*
+	 * Convert the "key" (IP address) to native (little) endian before
+	 * inserting it into the trie
+	 */
+	bswap_ip(key_be, bits, key);
 
 	if (!rcu_access_pointer(*trie)) {
 		node = kzalloc(sizeof(*node), GFP_KERNEL);
 		if (!node)
 			return -ENOMEM;
 		node->peer = peer;
-		copy_and_assign_cidr(node, key, cidr);
+		copy_and_assign_cidr(node, bits, key, cidr);
 		rcu_assign_pointer(*trie, node);
 		return 0;
 	}
@@ -214,7 +250,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 	if (!newnode)
 		return -ENOMEM;
 	newnode->peer = peer;
-	copy_and_assign_cidr(newnode, key, cidr);
+	copy_and_assign_cidr(newnode, bits, key, cidr);
 
 	if (!node)
 		down = rcu_dereference_protected(*trie, lockdep_is_held(lock));
@@ -240,7 +276,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 			kfree(newnode);
 			return -ENOMEM;
 		}
-		copy_and_assign_cidr(node, newnode->bits, cidr);
+		copy_and_assign_cidr(node, bits, newnode->bits, cidr);
 
 		rcu_assign_pointer(choose_node(node, down->bits), down);
 		rcu_assign_pointer(choose_node(node, newnode->bits), newnode);
