@@ -82,10 +82,23 @@ static void free_root_node(struct allowedips_node __rcu *top, struct mutex *lock
 		call_rcu_bh(&node->rcu, node_free_rcu);
 }
 
+static u8 family_to_bits(int family)
+{
+	switch (family) {
+	case AF_INET:
+		return 32;
+	case AF_INET6:
+		return 128;
+	default:
+		BUG();
+	}
+}
+
 static int walk_by_peer(struct allowedips_node __rcu *top, int family, struct allowedips_cursor *cursor, struct wireguard_peer *peer, int (*func)(void *ctx, const u8 *ip, u8 cidr, int family), void *ctx, struct mutex *lock)
 {
 	struct allowedips_node *node;
 	int ret;
+	u8 ip[16];
 
 	if (!rcu_access_pointer(top))
 		return 0;
@@ -96,7 +109,8 @@ static int walk_by_peer(struct allowedips_node __rcu *top, int family, struct al
 	for (; cursor->len > 0 && (node = cursor->stack[cursor->len - 1]); --cursor->len, push(cursor->stack, node->bit[0], cursor->len), push(cursor->stack, node->bit[1], cursor->len)) {
 		if (node->peer != peer)
 			continue;
-		ret = func(ctx, node->bits, node->cidr, family);
+		bswap_ip(node->bits, family_to_bits(family), ip);
+		ret = func(ctx, ip, node->cidr, family);
 		if (ret)
 			return ret;
 	}
