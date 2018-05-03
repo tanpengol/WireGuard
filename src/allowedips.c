@@ -130,9 +130,9 @@ static __always_inline unsigned int fls128(u64 a, u64 b)
 static __always_inline u8 common_bits(const struct allowedips_node *node, const u8 *key, u8 bits)
 {
 	if (bits == 32)
-		return 32 - fls(be32_to_cpu(*(const __be32 *)node->bits ^ *(const __be32 *)key));
+		return 32 - fls(be32_to_cpu(node->v4 ^ *(const __be32 *)key));
 	else if (bits == 128)
-		return 128 - fls128(be64_to_cpu(*(const __be64 *)&node->bits[0] ^ *(const __be64 *)&key[0]), be64_to_cpu(*(const __be64 *)&node->bits[8] ^ *(const __be64 *)&key[8]));
+		return 128 - fls128(be64_to_cpu(node->v6[0] ^ *(const __be64 *)&key[0]), be64_to_cpu(node->v6[1] ^ *(const __be64 *)&key[8]));
 	return 0;
 }
 
