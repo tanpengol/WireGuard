@@ -41,7 +41,7 @@ static void bswap_ip(const void *ip, u8 bits, void *out) {
 
 static void copy_and_assign_cidr(struct allowedips_node *node, u8 bits, const u8 *src, u8 cidr)
 {
-	static const u8 mapping[16] = {
+	u8 mapping[16] = {
 		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 	};
 	int i;
