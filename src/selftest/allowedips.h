@@ -347,6 +347,29 @@ static __init inline struct in6_addr *ip6(u32 a, u32 b, u32 c, u32 d)
 	return &ip;
 }
 
+struct walk_ctx {
+	int count;
+	bool found_a, found_b, found_c;
+	bool found_other;
+};
+
+static __init int walk_callback(void *ctx, const u8 *ip, u8 cidr, int family) {
+	struct walk_ctx *wctx = ctx;
+
+	wctx->count++;
+
+	if (cidr == 27 && !memcmp(ip, ip4(192, 95, 5, 64), sizeof(struct in_addr)))
+		wctx->found_a = true;
+	else if (cidr == 128 && !memcmp(ip, ip6(0x26075300, 0x60006b00, 0, 0xc05f0543), sizeof(struct in6_addr)))
+		wctx->found_b = true;
+	else if (cidr == 29 && !memcmp(ip, ip4(10, 1, 0, 16), sizeof(struct in_addr)))
+		wctx->found_c = true;
+	else
+		wctx->found_other = true;
+
+	return 0;
+}
+
 #define init_peer(name) do { \
 	name = kzalloc(sizeof(struct wireguard_peer), GFP_KERNEL); \
 	if (!name) { \
@@ -478,6 +501,25 @@ bool __init allowedips_selftest(void)
 	insert(4, a, 192, 168, 0, 0, 24);
 	allowedips_remove_by_peer(&t, a, &mutex);
 	test_negative(4, a, 192, 168, 0, 1);
+
+	do {
+		struct walk_ctx wctx;
+		struct allowedips_cursor cursor;
+		bool _s;
+
+		allowedips_init(&t);
+		insert(4, a, 192, 95, 5, 64, 27);
+		insert(6, a, 0x26075300, 0x60006b00, 0, 0xc05f0543, 128);
+		insert(4, a, 10, 1, 0, 16, 29);
+
+		memset(&wctx, 0, sizeof(wctx));
+		memset(&cursor, 0, sizeof(cursor));
+		allowedips_walk_by_peer(&t, &cursor, a, walk_callback, &wctx, &mutex);
+		_s = wctx.count == 3 && wctx.found_a && wctx.found_b && wctx.found_c && !wctx.found_other;
+		maybe_fail;
+
+		allowedips_free(&t, &mutex);
+	} while(0);
 
 	/* These will hit the BUG_ON(len >= 128) in free_node if something goes wrong. */
 	for (i = 0; i < 128; ++i) {
