@@ -15,73 +15,36 @@ struct allowedips_node {
 	 * doesn't actually make a difference.
 	 */
 	union {
-		/*__be64 v6[2];*/
-		/*__be32 v4;*/
+		u64 v6[2];
+		u32 v4;
 		u8 bits[16];
 	};
 
-	union {
-		u64 v6[2];
-		u32 v4;
-		u8 bits2[16];
-	};
 	u8 cidr, bit_at_a, bit_at_b;
 };
 
-static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, const u8 *native, u8 cidr, u8 bits)
+static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src, u8 cidr, u8 bits)
 {
-	union {
-		__be64 v6[2];
-		__be32 v4;
-		u8 bits[16];
-	} debug;
-	u64 debug_mask[2] = {0ULL, 0ULL};
+	const u64 mapping[] = {0x01020304050607, 0x08090a0b0c0d0e0f};
 
 	node->cidr = cidr;
-	node->bit_at_a = cidr / 8; // TODO: don't depend on BE
+	node->bit_at_a = 0;
 	node->bit_at_b = 7 - (cidr % 8);
+
+	if (bits == 32)
+		node->bit_at_a = ((u8 *)mapping)[cidr / 8 + 4]; // TODO: cidr == 32 = ??
+	else
+		node->bit_at_a = ((u8 *)mapping)[cidr / 8]; // TODO:  cidr == 128 = BAD
+
 	if (cidr) {
-		memcpy(node->bits, src, (cidr + 7) / 8);
-		node->bits[(cidr + 7) / 8 - 1] &= ~0U << ((8 - (cidr % 8)) % 8);
-
-		/*memcpy(node->bits2, native, (cidr + 7) / 8);*/
-		memcpy(node->bits2, native, bits/8);
-		if (bits == 32)
-			node->v4 &= ~0U << (32 - cidr);
-		else if (bits == 128) {
-			// /16 -> ffff 0000
-			// /32 -> ffff ffff
-			if (cidr > 64) {
-				debug_mask[0] = ~0ULL;
-				debug_mask[1] = ~0ULL << (128 - cidr);
-			} else {
-				debug_mask[0] = ~0ULL << (64 - cidr);
-			}
-
-			/*pr_err("before: %016llx %016llx", node->v6[0], node->v6[1]);*/
-			/*pr_err("mask:   %016llx %016llx (%u)", debug_mask[0], debug_mask[1], cidr);*/
-
-			// IPAddress & SubnetMask
-			/*node->v6[((cidr + 63) / 64) - 1] &= ~0ULL << ((128 - cidr) % 64);*/
-			node->v6[0] &= debug_mask[0];
-			node->v6[1] &= debug_mask[1];
-			/*pr_err("after:  %016llx %016llx", node->v6[0], node->v6[1]);*/
-		} else
-			BUG_ON(1);
-
-		// debug
+		memcpy(node->bits, src, bits/8);
 		if (bits == 32) {
-			debug.v4 = cpu_to_be32p((u32 *)&node->v4);
-		} else {
-			debug.v6[0] = cpu_to_be64p((u64 *)&node->v6[0]);
-			debug.v6[1] = cpu_to_be64p((u64 *)&node->v6[1]);
-		}
-
-		if (memcmp(node->bits, debug.bits, bits/8)) {
-			pr_err("node->bits old: %*phC (%u)", bits/8, node->bits, bits);
-			pr_err("node->bits new: %*phC", bits/8, debug.bits);
-			/*BUG_ON(1);*/
-		}
+			node->v4 &= ~0U << (32 - cidr);
+		} else if (bits == 128) {
+			// IPAddress & SubnetMask
+			node->bits[node->bit_at_a] &= ~0U << ((8 - (cidr % 8)) % 8);
+		} else
+			BUG();
 	}
 }
 
@@ -179,43 +142,13 @@ static __always_inline unsigned int fls128(u64 a, u64 b)
 	return a ? fls64(a) + 64 : fls64(b);
 }
 
-static __always_inline u8 common_bits_orig(const struct allowedips_node *node, const u8 *key, u8 bits)
+static __always_inline u8 common_bits(const struct allowedips_node *node, const u8 *key, u8 bits)
 {
 	if (bits == 32)
-		return 32 - fls(be32_to_cpu(*(const __be32 *)node->bits ^ *(const __be32 *)key));
-	else if (bits == 128)
-		return 128 - fls128(be64_to_cpu(*(const __be64 *)&node->bits[0] ^ *(const __be64 *)&key[0]), be64_to_cpu(*(const __be64 *)&node->bits[8] ^ *(const __be64 *)&key[8]));
-	return 0;
-}
-
-static __always_inline u8 common_bits_correct(const struct allowedips_node *node, const u8 *key, u8 bits)
-{
-	if (bits == 32)
-		return 32 - fls(node->v4 ^ *(const u32 *)&key[0]); // TODO: *(const u32 *)key ?
+		return 32 - fls(node->v4 ^ *(const u32 *)key);
 	else if (bits == 128)
 		return 128 - fls128(node->v6[0] ^ *(const u64 *)&key[0], node->v6[1] ^ *(const u64 *)&key[8]);
 	return 0;
-}
-
-static __always_inline u8 common_bits_new(const struct allowedips_node *node, const u8 *key, u8 bits)
-{
-	if (bits == 32)
-		return 32 - fls(node->v4 ^ be32_to_cpup((const __be32 *)key));
-	else if (bits == 128)
-		return 128 - fls128(node->v6[0] ^ be64_to_cpup((const __be64 *)&key[0]), node->v6[1] ^ be64_to_cpup((const __be64 *)&key[8]));
-	return 0;
-}
-
-static __always_inline u8 common_bits(const struct allowedips_node *node, const u8 *key, u8 bits)
-{
-	u8 orig = common_bits_orig(node, key, bits);
-	u8 new = common_bits_new(node, key, bits);
-
-	if (orig != new) {
-		pr_err("Orig: %u, new: %u", orig, new);
-	}
-
-	return orig;
 }
 
 /* This could be much faster if it actually just compared the common bits properly,
@@ -239,16 +172,29 @@ static __always_inline struct allowedips_node *find_node(struct allowedips_node 
 	return found;
 }
 
+static void convert_ip_native(const u8 *key, u8 *dest, u8 bits)
+{
+	if (bits == 32) {
+		*((u32 *)dest) = be32_to_cpup((const __be32 *)key);
+	} else if (bits == 128) {
+		((u64 *)dest)[0] = be64_to_cpup((const __be64 *)&key[0]);
+		((u64 *)dest)[1] = be64_to_cpup((const __be64 *)&key[8]);
+	} else {
+		BUG();
+	}
+}
+
 /* Returns a strong reference to a peer */
 static __always_inline struct wireguard_peer *lookup(struct allowedips_node __rcu *root, u8 bits, const void *ip)
 {
 	struct wireguard_peer *peer = NULL;
 	struct allowedips_node *node;
+	u8 ip_native[16];
 
-	// TODO: convert ip
+	convert_ip_native(ip, ip_native, bits);
 
 	rcu_read_lock_bh();
-	node = find_node(rcu_dereference_bh(root), bits, ip);
+	node = find_node(rcu_dereference_bh(root), bits, ip_native);
 	if (node)
 		peer = peer_get(node->peer);
 	rcu_read_unlock_bh();
@@ -276,37 +222,23 @@ static inline bool node_placement(struct allowedips_node __rcu *trie, const u8 *
 static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 cidr, struct wireguard_peer *peer, struct mutex *lock)
 {
 	struct allowedips_node *node, *parent, *down, *newnode;
-	union {
-		u32 v4;
-		u64 v6[2];
-		u8 bits[16];
-	} native;
+	u8 key_native[16];
 
 	if (unlikely(cidr > bits || !peer))
 		return -EINVAL;
 
-	if (bits == 32) {
-		native.v4 = be32_to_cpup((const __be32 *)&key[0]);
-		/*key = (const u8 *)&native.v4;*/
-	} else if (bits == 128) {
-		native.v6[0] = be64_to_cpup((const __be64 *)&key[0]);
-		native.v6[1] = be64_to_cpup((const __be64 *)&key[8]);
-		/*key = (const u8 *)native.v6;*/
-	} else {
-		printk(KERN_ERR "This should not happen.");
-		BUG_ON(1);
-	}
+	convert_ip_native(key, key_native, bits);
 
 	if (!rcu_access_pointer(*trie)) {
 		node = kzalloc(sizeof(*node), GFP_KERNEL);
 		if (!node)
 			return -ENOMEM;
 		node->peer = peer;
-		copy_and_assign_cidr(node, key, native.bits, cidr, bits);
+		copy_and_assign_cidr(node, key_native, cidr, bits);
 		rcu_assign_pointer(*trie, node);
 		return 0;
 	}
-	if (node_placement(*trie, key, cidr, bits, &node, lock)) {
+	if (node_placement(*trie, key_native, cidr, bits, &node, lock)) {
 		node->peer = peer;
 		return 0;
 	}
@@ -315,18 +247,18 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 	if (!newnode)
 		return -ENOMEM;
 	newnode->peer = peer;
-	copy_and_assign_cidr(newnode, key, native.bits, cidr, bits);
+	copy_and_assign_cidr(newnode, key_native, cidr, bits);
 
 	if (!node)
 		down = rcu_dereference_protected(*trie, lockdep_is_held(lock));
 	else {
-		down = rcu_dereference_protected(choose_node(node, key), lockdep_is_held(lock));
+		down = rcu_dereference_protected(choose_node(node, key_native), lockdep_is_held(lock));
 		if (!down) {
-			rcu_assign_pointer(choose_node(node, key), newnode);
+			rcu_assign_pointer(choose_node(node, key_native), newnode);
 			return 0;
 		}
 	}
-	cidr = min(cidr, common_bits(down, key, bits));
+	cidr = min(cidr, common_bits(down, key_native, bits));
 	parent = node;
 
 	if (newnode->cidr == cidr) {
@@ -341,7 +273,7 @@ static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key, u8 c
 			kfree(newnode);
 			return -ENOMEM;
 		}
-		copy_and_assign_cidr(node, newnode->bits, native.bits, cidr, bits);
+		copy_and_assign_cidr(node, newnode->bits, cidr, bits);
 
 		rcu_assign_pointer(choose_node(node, down->bits), down);
 		rcu_assign_pointer(choose_node(node, newnode->bits), newnode);
