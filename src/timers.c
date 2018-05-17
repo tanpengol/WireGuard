@@ -37,6 +37,9 @@ static void expired_retransmit_handshake(struct timer_list *timer)
 {
 	peer_get_from_timer(timer_retransmit_handshake);
 
+	if (list_is_singular(&peer->device->peer_list) && peer->persistent_keepalive_interval)
+		netif_carrier_off(peer->device->dev);
+
 	if (peer->timer_handshake_attempts > MAX_TIMER_HANDSHAKES) {
 		pr_debug("%s: Handshake for peer %llu (%pISpfsc) did not complete after %d attempts, giving up\n", peer->device->dev->name, peer->internal_id, &peer->endpoint.addr, MAX_TIMER_HANDSHAKES + 2);
 
@@ -157,6 +160,7 @@ void timers_handshake_initiated(struct wireguard_peer *peer)
 /* Should be called after a handshake response message is received and processed or when getting key confirmation via the first data message. */
 void timers_handshake_complete(struct wireguard_peer *peer)
 {
+	netif_carrier_on(peer->device->dev);
 	if (likely(timers_active(peer)))
 		del_timer(&peer->timer_retransmit_handshake);
 	peer->timer_handshake_attempts = 0;

@@ -456,6 +456,8 @@ static int set_device(struct sk_buff *skb, struct genl_info *info)
 				goto out;
 		}
 	}
+	if (!list_is_singular(&wg->peer_list) || !list_first_entry(&wg->peer_list, struct wireguard_peer, peer_list)->persistent_keepalive_interval)
+		netif_carrier_on(wg->dev);
 	ret = 0;
 
 out:
