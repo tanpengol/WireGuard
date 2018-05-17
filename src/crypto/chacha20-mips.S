@@ -35,21 +35,19 @@
 #define OUT		$a0
 #define IN		$a1
 #define BYTES		$a2
-/* KEY and NONCE argument must be u32 algined! */
+/* KEY and NONCE argument must be u32 aligned */
 #define KEY		$a3
 /* NONCE pointer is given via stack */
 #define NONCE		$t9
 
 /* Output argument */
-/*
- * NONCE[0] is keeped in a register and not in memory,
- * we don't want to touch original value in memory.
- * Need incremented it every loop.
+/* NONCE[0] is kept in a register and not in memory.
+ * We don't want to touch original value in memory.
+ * Must be incremented every loop iteration.
  */
 #define NONCE_0		$v0
 
-/*
- * SAVED_X and SAVED_CA are set in the jump table.
+/* SAVED_X and SAVED_CA are set in the jump table.
  * Use regs which are overwritten on exit else we don't leak clear data.
  * They are used to handling the last bytes which are not multiple of 4.
  */
@@ -58,7 +56,7 @@
 
 #define PTR_LAST_ROUND	$t8
 
-/* Chacha20 constants and stack location */
+/* ChaCha20 constants and stack location */
 #define CONSTANT_OFS_SP	48
 #define UNALIGNED_OFS_SP 40
 
@@ -114,16 +112,16 @@
 	CPU_TO_LE32(X ## a); \
 	xor	X ## a, T1; \
 	sw	X ## a, x-4 ## (OUT);
-/*
- * Jump table macro.
- * Used for setup and handling the last bytes which are not multiple of 4.
+
+/* Jump table macro.
+ * Used for setup and handling the last bytes, which are not multiple of 4.
  * X15 is free to store Xn
- * Every jumptable entry must have an equal in size!
+ * Every jumptable entry must be equal in size.
  */
 #define JMPTBL_ALIGNED(x, a, s, o) \
 .Lchacha20_mips_jmptbl_aligned_ ## a: ; \
 	.if ((s == NONCE) && (o == 0)); \
-		move    SAVED_CA, NONCE_0; \
+		move	SAVED_CA, NONCE_0; \
 	.else; \
 		lw	SAVED_CA, o(s);\
 	.endif; \
@@ -133,7 +131,7 @@
 #define JMPTBL_UNALIGNED(x, a, s, o) \
 .Lchacha20_mips_jmptbl_unaligned_ ## a: ; \
 	.if ((s == NONCE) && (o == 0)); \
-		move    SAVED_CA, NONCE_0; \
+		move	SAVED_CA, NONCE_0; \
 	.else; \
 		lw	SAVED_CA, o(s);\
 	.endif; \
@@ -187,9 +185,8 @@ chacha20_mips:
 	sw	$s6, 32($sp)
 	sw	$s7, 36($sp)
 
-	lw      NONCE_0, 0(NONCE)
-	/*
-	 * Test IN or OUT is unaligned.
+	lw	NONCE_0, 0(NONCE)
+	/* Test IN or OUT is unaligned.
 	 * UNALIGNED (T1) = ( IN | OUT ) & 0x00000003
 	 */
 	or	T1, IN, OUT
@@ -259,19 +256,19 @@ chacha20_mips:
 	bnez	$at, .Loop_chacha20_xor_rounds
 	addiu	$at, -1
 
-	/* Unalgined? Jump */
+	/* Unaligned? Jump */
 	bnez	T1, .Loop_chacha20_unaligned
 	andi	$at, BYTES, MASK_U32
 
-	/* Last round? no jump */
+	/* Last round? No jump */
 	bne	OUT, PTR_LAST_ROUND, .Lchacha20_mips_xor_aligned_64_b
 	/* Load upper half of jump table addr */
 	lui	T0, %hi(.Lchacha20_mips_jmptbl_aligned_0)
 
-	/* Full block? jump */
+	/* Full block? Jump */
 	beqz	BYTES, .Lchacha20_mips_xor_aligned_64_b
 	/* Calculate lower half jump table addr and offset */
-	ins     T0, $at, 2, 6
+	ins	T0, $at, 2, 6
 
 	subu	T0, $at
 	addiu	T0, %lo(.Lchacha20_mips_jmptbl_aligned_0)
@@ -290,7 +287,7 @@ chacha20_mips:
 	/* Load upper half of jump table addr */
 	lui	T0, %hi(.Lchacha20_mips_jmptbl_unaligned_0)
 
-	/* Full block? jump */
+	/* Full block? Jump */
 	beqz	BYTES, .Lchacha20_mips_xor_unaligned_64_b
 
 	/* Calculate lower half jump table addr and offset */
@@ -304,8 +301,7 @@ chacha20_mips:
 
 	.set	reorder
 
-/*
- * Aligned Code Path
+/* Aligned code path
  */
 .align 4
 	STORE_ALIGNED(64, 15, NONCE,12)
@@ -380,8 +376,7 @@ chacha20_mips:
 	/* End jump table */
 	.set reorder
 
-/*
- * Unaligned Code Path
+/* Unaligned code path
  */
 	STORE_UNALIGNED(64, 15, NONCE,12)
 	STORE_UNALIGNED(60, 14, NONCE, 8)
@@ -415,7 +410,7 @@ chacha20_mips:
 	/* Fall through to byte handling */
 	.set noreorder
 	beq	$at, BYTES, .Lchacha20_mips_xor_done
-	/* Empty delayslot, Increase NONCE_0, return NONCE_0 value */
+	/* Empty delayslot, increase NONCE_0, return NONCE_0 value */
 .Lchacha20_mips_xor_unaligned_0_b:
 .Lchacha20_mips_xor_aligned_0_b:
 	addiu	NONCE_0, 1
@@ -425,7 +420,7 @@ chacha20_mips:
 	addu	OUT, $at
 	addu	IN, $at
 	addu	SAVED_X, SAVED_CA
-	/* First Byte */
+	/* First byte */
 	lbu	T1, 0(IN)
 	andi	$at, BYTES, 2
 	CPU_TO_LE32(SAVED_X)
@@ -435,7 +430,7 @@ chacha20_mips:
 	beqz	$at, .Lchacha20_mips_xor_done
 	sb	T1, 0(OUT)
 	.set reorder
-	/* Second Byte */
+	/* Second byte */
 	lbu	T1, 1(IN)
 	andi	$at, BYTES, 1
 	ROTx	SAVED_X, 8
@@ -444,7 +439,7 @@ chacha20_mips:
 	beqz	$at, .Lchacha20_mips_xor_done
 	sb	T1, 1(OUT)
 	.set reorder
-	/* Third Byte */
+	/* Third byte */
 	lbu	T1, 2(IN)
 	ROTx	SAVED_X, 8
 	xor	T1, SAVED_X

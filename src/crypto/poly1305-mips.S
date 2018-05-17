@@ -3,8 +3,6 @@
  * Copyright (C) 2016-2018 René van Dorst <opensource@vdorst.com> All Rights Reserved.
  */
 
-#include <linux/linkage.h>
-
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define MSB 0
 #define LSB 3
@@ -40,10 +38,10 @@
 #define CA $v0
 
 /* Input arguments */
-#define poly       $a0
-#define src        $a1
-#define srclen     $a2
-#define hibit      $a3
+#define poly	$a0
+#define src	$a1
+#define srclen	$a2
+#define hibit	$a3
 
 #define PTR_POLY1305_R(n) ( 0 + (n*4)) ## ($a0)
 #define PTR_POLY1305_S(n) (16 + (n*4)) ## ($a0)
@@ -195,7 +193,7 @@ poly1305_blocks_mips:
 	mfhi	CA
 	mflo	H3
 
-	addiu	src,     POLY1305_BLOCK_SIZE
+	addiu	src, POLY1305_BLOCK_SIZE
 
 	/* h4 += (u32)(d3 >> 32); */
 	addu	O4, H4, CA
